@@ -1,0 +1,350 @@
+
+<h2 class="sr-only">Zoomable ALPIDE pixel decoder — table with input notes removed.</h2>
+<style>
+* { box-sizing: border-box; }
+.card { background: #F0EAD6; border: 1px solid rgba(0,0,0,0.10); border-radius: var(--border-radius-lg); padding: 12px 16px; margin-bottom: 10px; }
+.inp-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+label { font-size: 13px; color: #6B6A64; }
+input[type=number] { width: 84px; padding: 5px 8px; border-radius: var(--border-radius-md); border: 1px solid rgba(0,0,0,0.15); background: #F8F7F4; color: #2C2C2A; font-size: 13px; }
+.err { color: #C62828; font-size: 12px; margin-top: 4px; }
+.zoom-btns { display: flex; gap: 6px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }
+.zbtn { padding: 5px 14px; border-radius: var(--border-radius-md); border: 1px solid rgba(0,0,0,0.15); background: #ECEAE3; color: #6B6A64; font-size: 13px; cursor: pointer; }
+.zbtn.on { background: #E65100; color: #ffffff; border-color: #E65100; }
+.crumb { font-size: 12px; color: #6B6A64; margin-left: 6px; }
+.crumb span { color: #2C2C2A; }
+canvas { width: 100%; border: 1px solid rgba(0,0,0,0.10); border-radius: var(--border-radius-md); cursor: pointer; display: block; background: #F8F7F4; }
+.bit-row { display: flex; gap: 2px; flex-wrap: wrap; margin: 5px 0 3px; }
+.bit { width: 22px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 13px; font-weight: 500; border: 1px solid rgba(0,0,0,0.12); background: #ECEAE3; color: #2C2C2A; }
+.bit.prefix-rh { background: #D3D1C7; border-color: #5F5E5A; color: #2C2C2A; }
+.bit.region-id { background: #FFF3CD; border-color: #F9A825; color: #5D4037; }
+.bit.prefix-ds { background: #ECEAE3; border-color: #9E9D89; color: #2C2C2A; }
+.bit.enc       { background: #FFF3CD; border-color: #F9A825; color: #5D4037; }
+.bit.addr      { background: #FFE0B2; border-color: #E65100; color: #4E342E; }
+.word-label { font-size: 12px; color: #6B6A64; margin-bottom: 4px; font-weight: 500; }
+.word-hex { font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: #2C2C2A; }
+.leg { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.leg-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #6B6A64; }
+.leg-sq { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+td, th { padding: 6px 8px; border-bottom: 1px solid rgba(0,0,0,0.08); vertical-align: middle; }
+th { font-size: 11px; font-weight: 500; color: #6B6A64; white-space: nowrap; }
+.col-field { color: #6B6A64; width: 38%; font-family: var(--font-mono); font-size: 12px; }
+.col-val   { font-weight: 600; color: #E65100; font-family: var(--font-mono); width: 14%; white-space: nowrap; }
+.col-bin   { font-family: var(--font-mono); color: #5D4037; font-size: 11px; letter-spacing: 0.04em; white-space: nowrap; }
+.col-note  { color: #6B6A64; font-size: 11px; }
+.hl { background: #FFF8E1; }
+.sep td { border-bottom: 2px solid rgba(0,0,0,0.12); padding: 1px; }
+</style>
+
+<div class="card">
+  <div class="inp-row">
+    <label>Row (0–511)</label>
+    <input type="number" id="in-row" min="0" max="511" value="179" oninput="update()">
+    <label>Column (0–1023)</label>
+    <input type="number" id="in-col" min="0" max="1023" value="231" oninput="update()">
+  </div>
+  <div id="err" class="err"></div>
+</div>
+
+<div class="zoom-btns">
+  <button class="zbtn on" onclick="setZoom(0)">L1 — full chip</button>
+  <button class="zbtn"    onclick="setZoom(1)">L2 — region</button>
+  <button class="zbtn"    onclick="setZoom(2)">L3 — double column</button>
+  <span class="crumb" id="crumb"></span>
+</div>
+
+<canvas id="cv" height="370"></canvas>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+    <div class="word-label">REGION HEADER — 8 bits</div>
+    <div class="word-hex" id="rh-hex"></div>
+  </div>
+  <div class="bit-row" id="rh-bits"></div>
+  <div class="leg">
+    <div class="leg-item"><div class="leg-sq" style="background:#D3D1C7;border:1px solid #5F5E5A"></div>prefix 110</div>
+    <div class="leg-item"><div class="leg-sq" style="background:#FFF3CD;border:1px solid #F9A825"></div>region id[4:0]</div>
+    <div class="leg-item" style="margin-left:auto;font-size:12px;color:#6B6A64">sent once before all hits in this region</div>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+    <div class="word-label">DATA SHORT — 16 bits</div>
+    <div class="word-hex" id="ds-hex"></div>
+  </div>
+  <div class="bit-row" id="ds-bits"></div>
+  <div class="leg">
+    <div class="leg-item"><div class="leg-sq" style="background:#ECEAE3;border:1px solid #9E9D89"></div>prefix 01</div>
+    <div class="leg-item"><div class="leg-sq" style="background:#FFF3CD;border:1px solid #F9A825"></div>enc[3:0]</div>
+    <div class="leg-item"><div class="leg-sq" style="background:#FFE0B2;border:1px solid #E65100"></div>addr[9:0]</div>
+  </div>
+</div>
+
+<div class="card" style="padding:12px 10px">
+  <table>
+    <thead>
+      <tr>
+        <th class="col-field">field / formula</th>
+        <th class="col-val">value</th>
+        <th class="col-bin">binary</th>
+        <th class="col-note">note</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="col-field">col</td>                                        <td class="col-val" id="v-col">—</td>  <td class="col-bin" id="b-col">—</td>  <td class="col-note"></td></tr>
+      <tr><td class="col-field">row (addr[9:1])</td>                            <td class="col-val" id="v-row">—</td>  <td class="col-bin" id="b-row">—</td>  <td class="col-note">9 bits</td></tr>
+      <tr class="sep"><td colspan="4"></td></tr>
+      <tr class="hl"><td class="col-field">region = floor(col / 32)</td>        <td class="col-val" id="v-reg">—</td>  <td class="col-bin" id="b-reg">—</td>  <td class="col-note">5 bits → region id[4:0]</td></tr>
+      <tr class="hl"><td class="col-field">enc[3:0] = (col mod 32) / 2</td>     <td class="col-val" id="v-enc">—</td>  <td class="col-bin" id="b-enc">—</td>  <td class="col-note">4 bits → enc[3:0]</td></tr>
+      <tr class="hl"><td class="col-field">addr[0] = col mod 2</td>             <td class="col-val" id="v-a0">—</td>   <td class="col-bin" id="b-a0">—</td>   <td class="col-note" id="n-a0"></td></tr>
+      <tr class="hl"><td class="col-field">addr[9:0] = row × 2 + addr[0]</td>  <td class="col-val" id="v-addr">—</td> <td class="col-bin" id="b-addr">—</td> <td class="col-note">10 bits → addr[9:0]</td></tr>
+      <tr class="sep"><td colspan="4"></td></tr>
+      <tr><td class="col-field">global col check</td>                           <td class="col-val" id="v-chk">—</td>  <td class="col-bin" id="b-chk">—</td>  <td class="col-note" id="n-chk"></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let zoomLevel = 0;
+let W = 640, H = 370;
+
+const T = {
+  bg:'#F8F7F4', regions:'#ECEAE3', active:'#FFF3CD', pe:'#FFD54F', peNorm:'#D3D1C7',
+  pixel:'#E65100', text:'#2C2C2A', muted:'#6B6A64', border:'rgba(0,0,0,0.10)',
+  pillBg:'#E65100', pillFg:'#ffffff', activeStr:'#E65100', activeBorder:'#F9A825',
+};
+
+function getState() {
+  const row = parseInt(document.getElementById('in-row').value);
+  const col = parseInt(document.getElementById('in-col').value);
+  if (isNaN(row)||isNaN(col)||row<0||row>511||col<0||col>1023) return null;
+  const region = Math.floor(col / 32);
+  const colInR = col % 32;
+  const enc    = Math.floor(colInR / 2);
+  const colOff = colInR % 2;
+  const addr   = row * 2 + colOff;
+  const dsWord = (0b01 << 14) | (enc << 10) | addr;
+  const rhWord = (0b110 << 5) | region;
+  return { row, col, region, colInR, enc, colOff, addr, dsWord, rhWord };
+}
+
+function bin(n, bits) { return '0b' + n.toString(2).padStart(bits, '0'); }
+
+function resize() {
+  const rect = cv.parentElement.getBoundingClientRect();
+  W = Math.floor(rect.width) - 2;
+  cv.width = W; cv.height = H;
+}
+
+function pill(x, y, text, fill, fg, fs) {
+  ctx.font=(fs||11)+'px sans-serif';
+  const tw=ctx.measureText(text).width, ph=(fs||11)+7, pw=tw+12;
+  ctx.fillStyle=fill; ctx.beginPath(); ctx.roundRect(x-pw/2,y-ph/2,pw,ph,4); ctx.fill();
+  ctx.fillStyle=fg; ctx.textAlign='center'; ctx.fillText(text,x,y+1);
+}
+
+function drawTopAxis(mx,my,mw,ticks,activePill,axisLabel) {
+  ctx.font='500 11px sans-serif'; ctx.fillStyle=T.muted; ctx.textAlign='center';
+  ctx.fillText(axisLabel,mx+mw/2,my-30);
+  ticks.forEach(([label,x])=>{
+    ctx.fillStyle=T.muted; ctx.font='11px sans-serif'; ctx.textAlign='center';
+    ctx.fillText(label,x,my-18);
+    ctx.strokeStyle=T.border; ctx.lineWidth=0.5;
+    ctx.beginPath(); ctx.moveTo(x,my-10); ctx.lineTo(x,my); ctx.stroke();
+  });
+  if(activePill) pill(activePill.x,my-18,activePill.label,T.active,T.activeStr,11);
+}
+
+function drawBottomAxis(mx,my,mw,mh,ticks,activePill,axisLabel) {
+  ctx.font='500 11px sans-serif'; ctx.fillStyle=T.muted; ctx.textAlign='center';
+  ctx.fillText(axisLabel,mx+mw/2,my+mh+64);
+  ticks.forEach(([label,x])=>{
+    ctx.fillStyle=T.muted; ctx.font='11px sans-serif'; ctx.textAlign='center';
+    ctx.fillText(label,x,my+mh+52);
+    ctx.strokeStyle=T.border; ctx.lineWidth=0.5;
+    ctx.beginPath(); ctx.moveTo(x,my+mh+32); ctx.lineTo(x,my+mh+42); ctx.stroke();
+  });
+  if(activePill) pill(activePill.x,my+mh+52,activePill.label,T.pillBg,T.pillFg,11);
+}
+
+function drawRowAxis(mx,my,mh,ticks) {
+  ctx.textAlign='right'; ctx.font='11px sans-serif'; ctx.fillStyle=T.muted;
+  ctx.fillText('row',mx-6,my-8);
+  ticks.forEach(([n,y])=>{
+    ctx.fillText(n,mx-6,y+4);
+    ctx.strokeStyle=T.border; ctx.lineWidth=0.5;
+    ctx.beginPath(); ctx.moveTo(mx-4,y); ctx.lineTo(mx,y); ctx.stroke();
+  });
+}
+
+function drawRowPill(mx,my,mh,row,rowToY) {
+  let ry=rowToY(row);
+  ry=Math.max(my+10,Math.min(my+mh-10,ry));
+  pill(mx-38,ry,'row '+row,T.pillBg,T.pillFg,11);
+}
+
+function drawL1(s) {
+  const mx=100,my=46,mw=W-120,mh=H-148,regW=mw/32;
+  ctx.clearRect(0,0,W,H); ctx.fillStyle=T.bg; ctx.fillRect(0,0,W,H);
+  for(let i=0;i<32;i++){
+    const rx=mx+i*regW;
+    ctx.fillStyle=(i===s.region)?T.active:T.regions; ctx.fillRect(rx,my,regW,mh);
+    ctx.strokeStyle=T.border; ctx.lineWidth=0.5; ctx.strokeRect(rx,my,regW,mh);
+  }
+  const colW=mw/1024,colX=mx+(s.col+0.5)*colW,rowY=my+(s.row/511)*mh;
+  ctx.strokeStyle=T.pixel; ctx.lineWidth=1.5; ctx.setLineDash([5,3]);
+  ctx.beginPath(); ctx.moveTo(colX,my); ctx.lineTo(colX,my+mh); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(mx,rowY); ctx.lineTo(mx+mw,rowY); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle=T.pixel; ctx.beginPath(); ctx.arc(colX,rowY,5,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=T.bg; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.fillStyle=T.regions; ctx.fillRect(mx,my+mh,mw,30);
+  ctx.strokeStyle=T.border; ctx.lineWidth=0.5; ctx.strokeRect(mx,my+mh,mw,30);
+  ctx.fillStyle=T.text; ctx.font='500 12px sans-serif'; ctx.textAlign='center';
+  ctx.fillText('Digital periphery',mx+mw/2,my+mh+16);
+  drawTopAxis(mx,my,mw,[0,8,16,24,31].map(i=>[i,mx+i*regW+regW/2]),
+    {x:Math.max(mx+40,Math.min(mx+mw-40,mx+s.region*regW+regW/2)),label:'region '+s.region},'region');
+  drawBottomAxis(mx,my,mw,mh,[0,256,512,768,1023].map(c=>[c,mx+c*colW]),
+    {x:Math.max(mx+40,Math.min(mx+mw-40,colX)),label:'col '+s.col},'column');
+  drawRowAxis(mx,my,mh,[[0,my],[255,my+mh/2],[511,my+mh]]);
+  drawRowPill(mx,my,mh,s.row,r=>my+(r/511)*mh);
+  ctx.fillStyle=T.muted; ctx.textAlign='center'; ctx.font='11px sans-serif';
+  ctx.fillText('click to zoom into region '+s.region,mx+mw/2,H-6);
+}
+
+function drawL2(s) {
+  const mx=100,my=46,mw=W-120,mh=H-148,dcW=mw/16;
+  ctx.clearRect(0,0,W,H); ctx.fillStyle=T.bg; ctx.fillRect(0,0,W,H);
+  for(let i=0;i<16;i++){
+    const lx=mx+i*dcW,peX=lx+dcW*0.38,peW=dcW*0.24;
+    ctx.fillStyle=(i===s.enc)?T.active:T.regions;
+    ctx.fillRect(lx,my,dcW*0.38,mh); ctx.fillRect(lx+dcW*0.62,my,dcW*0.38,mh);
+    ctx.fillStyle=(i===s.enc)?T.pe:T.peNorm; ctx.fillRect(peX,my,peW,mh);
+    ctx.strokeStyle=T.border; ctx.lineWidth=0.5; ctx.strokeRect(lx,my,dcW,mh);
+  }
+  const rowY=my+(s.row/511)*mh;
+  ctx.strokeStyle=T.pixel; ctx.lineWidth=1.5; ctx.setLineDash([5,3]);
+  ctx.beginPath(); ctx.moveTo(mx,rowY); ctx.lineTo(mx+mw,rowY); ctx.stroke();
+  ctx.setLineDash([]);
+  const dcX=mx+s.enc*dcW,pixX=dcX+(s.colOff===0?dcW*0.19:dcW*0.81);
+  ctx.fillStyle=T.pixel; ctx.beginPath(); ctx.arc(pixX,rowY,5,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=T.bg; ctx.lineWidth=1.5; ctx.stroke();
+  const colInRegW=mw/32,colInRegX=mx+(s.colInR+0.5)*colInRegW;
+  ctx.strokeStyle=T.pixel; ctx.lineWidth=1.5; ctx.setLineDash([5,3]);
+  ctx.beginPath(); ctx.moveTo(colInRegX,my); ctx.lineTo(colInRegX,my+mh); ctx.stroke();
+  ctx.setLineDash([]);
+  drawTopAxis(mx,my,mw,[0,4,8,12,15].map(i=>[i,mx+i*dcW+dcW/2]),
+    {x:Math.max(mx+40,Math.min(mx+mw-40,dcX+dcW/2)),label:'enc '+s.enc},'double column (enc)');
+  const rb=s.region*32;
+  drawBottomAxis(mx,my,mw,mh,[0,8,16,24,31].map(c=>[rb+c,mx+c*colInRegW]),
+    {x:Math.max(mx+40,Math.min(mx+mw-40,colInRegX)),label:'col '+s.col},'column in region');
+  ctx.fillStyle=T.regions; ctx.fillRect(mx,my+mh,mw,30);
+  ctx.strokeStyle=T.border; ctx.lineWidth=0.5; ctx.strokeRect(mx,my+mh,mw,30);
+  ctx.fillStyle=T.text; ctx.font='500 12px sans-serif'; ctx.textAlign='center';
+  ctx.fillText('Region '+s.region+'  —  16 double columns',mx+mw/2,my+mh+16);
+  drawRowAxis(mx,my,mh,[[0,my],[255,my+mh/2],[511,my+mh]]);
+  drawRowPill(mx,my,mh,s.row,r=>my+(r/511)*mh);
+  ctx.fillStyle=T.muted; ctx.textAlign='center'; ctx.font='11px sans-serif';
+  ctx.fillText('click to zoom into double column (enc='+s.enc+')',mx+mw/2,H-6);
+}
+
+function drawL3(s) {
+  const mx=100,my=46,mw=W-120,mh=H-90,nRows=10,cellH=mh/nRows;
+  const peW=Math.max(24,mw*0.08),colW=(mw-peW)/2;
+  const lx=mx,pex=mx+colW,rx=mx+colW+peW;
+  const rowBase=Math.floor(s.row/nRows)*nRows,gcb=s.region*32+s.enc*2;
+  ctx.clearRect(0,0,W,H); ctx.fillStyle=T.bg; ctx.fillRect(0,0,W,H);
+  for(let r=0;r<nRows;r++){
+    const ar=rowBase+r; if(ar>511)break;
+    const cy=my+r*cellH,isTgt=ar===s.row;
+    ctx.fillStyle=isTgt&&s.colOff===0?T.active:T.regions; ctx.fillRect(lx,cy,colW,cellH);
+    ctx.strokeStyle=isTgt&&s.colOff===0?T.activeBorder:T.border; ctx.lineWidth=isTgt&&s.colOff===0?1.5:0.5; ctx.strokeRect(lx,cy,colW,cellH);
+    ctx.fillStyle=isTgt&&s.colOff===1?T.active:T.regions; ctx.fillRect(rx,cy,colW,cellH);
+    ctx.strokeStyle=isTgt&&s.colOff===1?T.activeBorder:T.border; ctx.lineWidth=isTgt&&s.colOff===1?1.5:0.5; ctx.strokeRect(rx,cy,colW,cellH);
+    ctx.fillStyle=isTgt?T.pe:T.peNorm; ctx.fillRect(pex,cy,peW,cellH);
+    ctx.strokeStyle=T.border; ctx.lineWidth=0.5; ctx.strokeRect(pex,cy,peW,cellH);
+    ctx.font='12px sans-serif'; ctx.textAlign='center';
+    ctx.fillStyle=isTgt&&s.colOff===0?T.activeStr:T.text;
+    ctx.fillText('addr '+(ar*2),lx+colW/2,cy+cellH/2+4);
+    ctx.fillStyle=isTgt&&s.colOff===1?T.activeStr:T.text;
+    ctx.fillText('addr '+(ar*2+1),rx+colW/2,cy+cellH/2+4);
+    ctx.fillStyle=T.muted; ctx.font='10px sans-serif';
+    ctx.fillText('PE',pex+peW/2,cy+cellH/2+3);
+  }
+  drawTopAxis(mx,my,mw,[[gcb,lx+colW/2],['PE',pex+peW/2],[gcb+1,rx+colW/2]],
+    {x:s.colOff===0?lx+colW/2:rx+colW/2,label:'col '+(gcb+s.colOff)},'pixel column');
+  const rowToY=r=>my+(r-rowBase)*cellH+cellH/2;
+  const r0=rowBase,r1=Math.min(rowBase+nRows-1,511);
+  drawRowAxis(mx,my,mh,[[r0,rowToY(r0)],[Math.floor((r0+r1)/2),rowToY(Math.floor((r0+r1)/2))],[r1,rowToY(r1)]]);
+  drawRowPill(mx,my,mh,s.row,rowToY);
+  ctx.fillStyle=T.muted; ctx.textAlign='center'; ctx.font='11px sans-serif';
+  ctx.fillText('enc '+s.enc+'  |  region '+s.region+'  |  rows '+r0+'–'+r1,mx+mw/2,H-6);
+}
+
+function draw() {
+  const s=getState(); if(!s)return;
+  if(zoomLevel===0)drawL1(s); else if(zoomLevel===1)drawL2(s); else drawL3(s);
+}
+
+function setZoom(z) {
+  zoomLevel=z;
+  document.querySelectorAll('.zbtn').forEach((b,i)=>b.classList.toggle('on',i===z));
+  updateCrumb(); draw();
+}
+
+function updateCrumb() {
+  const s=getState(); if(!s)return;
+  const parts=['chip'];
+  if(zoomLevel>=1)parts.push('region '+s.region);
+  if(zoomLevel>=2)parts.push('enc '+s.enc);
+  document.getElementById('crumb').innerHTML=parts.map((p,i)=>
+    i<parts.length-1?'<span>'+p+'</span> ›':'<span style="color:#2C2C2A;font-weight:500">'+p+'</span>'
+  ).join(' ');
+}
+
+cv.addEventListener('click',()=>{if(zoomLevel<2)setZoom(zoomLevel+1);});
+
+function updateWords(s) {
+  const rhEl=document.getElementById('rh-bits'); rhEl.innerHTML='';
+  [{b:['1','1','0'],cls:'prefix-rh'},{b:s.region.toString(2).padStart(5,'0').split(''),cls:'region-id'}]
+    .forEach(g=>g.b.forEach(c=>{const d=document.createElement('div');d.className='bit '+g.cls;d.textContent=c;rhEl.appendChild(d);}));
+  document.getElementById('rh-hex').textContent='0x'+s.rhWord.toString(16).toUpperCase().padStart(2,'0');
+  const dsEl=document.getElementById('ds-bits'); dsEl.innerHTML='';
+  [{b:['0','1'],cls:'prefix-ds'},{b:s.enc.toString(2).padStart(4,'0').split(''),cls:'enc'},{b:s.addr.toString(2).padStart(10,'0').split(''),cls:'addr'}]
+    .forEach(g=>g.b.forEach(c=>{const d=document.createElement('div');d.className='bit '+g.cls;d.textContent=c;dsEl.appendChild(d);}));
+  document.getElementById('ds-hex').textContent='0x'+s.dsWord.toString(16).toUpperCase().padStart(4,'0');
+}
+
+function set(id, val, binStr, note) {
+  document.getElementById('v-'+id).textContent = val;
+  document.getElementById('b-'+id).textContent = binStr;
+  const nel=document.getElementById('n-'+id);
+  if(nel) nel.textContent = note||'';
+}
+
+function updateTable(s) {
+  document.getElementById('v-col').textContent  = s.col;
+  document.getElementById('b-col').textContent  = bin(s.col, 10);
+  document.getElementById('v-row').textContent  = s.row;
+  document.getElementById('b-row').textContent  = bin(s.row, 9);
+  set('reg',  s.region, bin(s.region, 5), '5 bits → region id[4:0]');
+  set('enc',  s.enc,    bin(s.enc, 4),    '4 bits → enc[3:0]');
+  set('a0',   s.colOff, bin(s.colOff, 1), s.colOff===0?'left col':'right col');
+  set('addr', s.addr,   bin(s.addr, 10),  '10 bits → addr[9:0]');
+  const chk=s.region*32+s.enc*2+s.colOff;
+  set('chk',  chk, bin(chk, 10), chk===s.col?'= col ✓':'✗');
+}
+
+function update() {
+  const s=getState();
+  document.getElementById('err').textContent=s?'':'row 0–511, column 0–1023';
+  if(!s)return;
+  updateCrumb(); updateWords(s); updateTable(s); draw();
+}
+
+window.addEventListener('resize',()=>{resize();draw();});
+resize(); update();
+</script>
